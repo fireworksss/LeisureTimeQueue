@@ -1,0 +1,10 @@
+- insert:
+    - id: leisure-time-queue
+      name: leisure-time-queue
+      config:
+        enabled: true
+        storageFile: .dsh/leisure-time-queue.json
+        pollIntervalSeconds: 15
+        dailyCreateLimit: 3
+        maxConcurrentTasks: 1
+        maxContinuationRounds: 3

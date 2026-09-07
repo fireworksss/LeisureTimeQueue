@@ -1,0 +1,18 @@
+{
+  "name": "leisure-time-queue",
+  "version": "0.2.6",
+  "description": "Durable LeisureTimeQueue plugin for DeepSeek Harness",
+  "interface": {
+    "displayName": "LeisureTimeQueue",
+    "shortDescription": "Run queued Harness tasks during user-defined time windows.",
+    "longDescription": "LeisureTimeQueue is a native Cordis plugin for DeepSeek Harness that persists one-shot tasks, dispatches them during user-defined weekly execution windows, and exposes task management tools to the agent.",
+    "developerName": "LeisureTimeQueue contributors",
+    "category": "Productivity",
+    "capabilities": ["Automation", "Task management", "Persistent queue"],
+    "defaultPrompt": [
+      "Create a LeisureTimeQueue task for this repository.",
+      "Show my queued LeisureTimeQueue tasks.",
+      "Configure the weekly time windows when queued work may start."
+    ]
+  }
+}

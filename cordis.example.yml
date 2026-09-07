@@ -1,0 +1,17 @@
+# Optional profile override after the package has been installed. The package's
+# cordis.patch.yml already supplies safe defaults, so this file is only needed
+# when a deployment wants different composition-layer values.
+
+- insert:
+    - id: leisure-time-queue
+      name: leisure-time-queue
+      config:
+        enabled: true
+        storageFile: .dsh/leisure-time-queue.json
+        pollIntervalSeconds: 15
+        dailyCreateLimit: 3
+        maxConcurrentTasks: 1
+        maxContinuationRounds: 3
+        defaultPolicy:
+          timeZone: UTC
+          windows: []
