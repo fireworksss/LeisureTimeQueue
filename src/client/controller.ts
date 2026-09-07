@@ -5,6 +5,7 @@ import { createSnapshotStore, type SnapshotStore } from '@deepseek-ai/dsh-client
 import type { ConnectionHandle } from '@deepseek-ai/dsh-client-connection/client'
 import type { SettingsScope, SettingsScopeSnapshot } from '@deepseek-ai/dsh-client-ui-settings/client'
 import type { UiWorkspace } from '@deepseek-ai/dsh-client-ui-workspace/client'
+import type { SessionId } from '@deepseek-ai/dsh-session/types'
 import { LEISURE_RPC_CHANNEL } from '../shared.ts'
 import type { LeisureSettings } from '../settings.ts'
 import type { IdlePolicy, LeisureDashboard } from '../types.ts'
@@ -51,15 +52,16 @@ export interface CreateSessionTaskInput {
 export interface LeisureCardFace {
   readonly hooks: { readonly leisureQueue: SnapshotStore<LeisureClientState> }
   readonly refresh: () => void
-  readonly saveGlobal: (settings: LeisureSettings) => Promise<void>
-  readonly resetGlobal: () => Promise<void>
-  readonly saveSession: (sessionId: string, policy: IdlePolicy) => Promise<void>
-  readonly resetSession: (sessionId: string) => Promise<void>
-  readonly createTask: (sessionId: string, input: { title: string; prompt: string; notBefore?: string }) => Promise<void>
+  readonly saveGlobal: (settings: LeisureSettings) => Promise<boolean>
+  readonly resetGlobal: () => Promise<boolean>
+  readonly saveSession: (sessionId: string, policy: IdlePolicy) => Promise<boolean>
+  readonly resetSession: (sessionId: string) => Promise<boolean>
+  readonly createTask: (sessionId: string, input: { title: string; prompt: string; notBefore?: string }) => Promise<boolean>
   readonly pickDirectory: () => Promise<string | null>
-  readonly createSessionTask: (input: CreateSessionTaskInput) => Promise<void>
-  readonly updateTask: (sessionId: string, input: { id: string; title: string; prompt: string; notBefore: string }) => Promise<void>
-  readonly taskAction: (sessionId: string, action: string, id: string) => Promise<void>
+  readonly createSessionTask: (input: CreateSessionTaskInput) => Promise<boolean>
+  readonly updateTask: (sessionId: string, input: { id: string; title: string; prompt: string; notBefore: string }) => Promise<boolean>
+  readonly taskAction: (sessionId: string, action: string, id: string) => Promise<boolean>
+  readonly openSession: (sessionId: string) => void
 }
 
 interface RpcSuccess {
@@ -144,7 +146,7 @@ export class LeisureClientController {
   }
 
   /** Persist global live settings through the Harness settings namespace. */
-  saveGlobal(settings: LeisureSettings): Promise<void> {
+  saveGlobal(settings: LeisureSettings): Promise<boolean> {
     return this.run(async () => {
       await this.scope.mutate([
         { op: 'set', path: ['enabled'], value: settings.enabled },
@@ -169,7 +171,7 @@ export class LeisureClientController {
   }
 
   /** Clear all user-layer global overrides. */
-  resetGlobal(): Promise<void> {
+  resetGlobal(): Promise<boolean> {
     return this.run(async () => {
       await this.scope.mutate([
         { op: 'unset', path: ['enabled'] },
@@ -183,17 +185,17 @@ export class LeisureClientController {
   }
 
   /** Save a complete session schedule override. */
-  saveSession(sessionId: string, policy: IdlePolicy): Promise<void> {
+  saveSession(sessionId: string, policy: IdlePolicy): Promise<boolean> {
     return this.mutate('schedule.save', { sessionId, ...policy })
   }
 
   /** Remove a session schedule override. */
-  resetSession(sessionId: string): Promise<void> {
+  resetSession(sessionId: string): Promise<boolean> {
     return this.mutate('schedule.reset', { sessionId })
   }
 
   /** Create one task from the visual form. */
-  createTask(sessionId: string, input: { title: string; prompt: string; notBefore?: string }): Promise<void> {
+  createTask(sessionId: string, input: { title: string; prompt: string; notBefore?: string }): Promise<boolean> {
     return this.mutate('task.create', { sessionId, ...input })
   }
 
@@ -217,7 +219,7 @@ export class LeisureClientController {
   }
 
   /** Create a native Harness session, configure it, then queue its first task. */
-  createSessionTask(input: CreateSessionTaskInput): Promise<void> {
+  createSessionTask(input: CreateSessionTaskInput): Promise<boolean> {
     return this.run(async () => {
       const cwd = input.cwd?.trim()
       const reasoningEffort = this.supportedReasoningEffort(input)
@@ -251,12 +253,12 @@ export class LeisureClientController {
   }
 
   /** Save editable fields for a queued or paused task. */
-  updateTask(sessionId: string, input: { id: string; title: string; prompt: string; notBefore: string }): Promise<void> {
+  updateTask(sessionId: string, input: { id: string; title: string; prompt: string; notBefore: string }): Promise<boolean> {
     return this.mutate('task.update', { sessionId, ...input })
   }
 
   /** Apply one named task transition. */
-  taskAction(sessionId: string, action: string, id: string): Promise<void> {
+  taskAction(sessionId: string, action: string, id: string): Promise<boolean> {
     return this.mutate(`task.${action}`, { sessionId, id })
   }
 
@@ -283,10 +285,11 @@ export class LeisureClientController {
       createSessionTask: input => this.createSessionTask(input),
       updateTask: (sessionId, input) => this.updateTask(sessionId, input),
       taskAction: (sessionId, action, id) => this.taskAction(sessionId, action, id),
+      openSession: sessionId => { this.sessions.open(sessionId as SessionId) },
     }
   }
 
-  private mutate(endpoint: string, payload: object): Promise<void> {
+  private mutate(endpoint: string, payload: object): Promise<boolean> {
     return this.run(async () => {
       const value = await this.call(endpoint, payload)
       if (this.disposed) return
@@ -297,11 +300,12 @@ export class LeisureClientController {
     })
   }
 
-  private async run(operation: () => Promise<void>): Promise<void> {
-    if (this.disposed || this.store.getSnapshot().busy) return
+  private async run(operation: () => Promise<void>): Promise<boolean> {
+    if (this.disposed || this.store.getSnapshot().busy) return false
     this.store.update(state => { state.busy = true; delete state.error })
     try {
       await operation()
+      return true
     } catch (cause: unknown) {
       if (!this.disposed) {
         this.store.update(state => {
@@ -309,6 +313,7 @@ export class LeisureClientController {
           state.error = cause instanceof Error ? cause.message : String(cause)
         })
       }
+      return false
     } finally {
       if (!this.disposed) this.store.update(state => { state.busy = false })
     }

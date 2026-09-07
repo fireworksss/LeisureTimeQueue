@@ -1,7 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import type { InjectFace, PropsLocale, PropsRuntime } from '@deepseek-ai/dsh-client-ui-slots'
 import type {} from '@deepseek-ai/dsh-client-ui-settings-plugins/client'
-import { IconCloseOutline16, IconFolderOpenOutline16 } from '@deepseek-ai/dsh-client-ui-primitives'
 import { DEFAULT_CONFIG, normalizeIdlePolicy } from '../config.ts'
 import type { LeisureSettings } from '../settings.ts'
 import type {
@@ -11,10 +10,11 @@ import type {
   TaskStatus,
   Weekday,
 } from '../types.ts'
-import type { LeisureCardFace, LeisureClientState } from './controller.ts'
+import type { LeisureCardFace } from './controller.ts'
 import type { LeisureLocaleKey } from './locales.ts'
 import { sessionIdentity } from './session-label.ts'
 import { systemTimeZone, timeZoneOptions } from './timezones.ts'
+import { TaskCreateForm } from './TaskCreateForm.tsx'
 
 const NS = 'settings.leisure-time-queue'
 const WEEKDAYS: readonly Weekday[] = ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat']
@@ -48,22 +48,6 @@ interface EditDraft {
   readonly prompt: string
   readonly notBefore: string
 }
-
-interface ModelChoice {
-  readonly key: string
-  readonly provider: string
-  readonly providerName: string
-  readonly model: string
-  readonly modelName: string
-  readonly efforts: readonly { readonly id: string; readonly name: string }[]
-  readonly defaultEffort?: string
-}
-
-const PERMISSION_PRESETS = [
-  { id: 'read-only', label: 'permissionReadOnly' },
-  { id: 'workspace-write', label: 'permissionWorkspaceWrite' },
-  { id: 'danger-full-access', label: 'permissionFullAccess' },
-] as const satisfies readonly { readonly id: string; readonly label: LeisureLocaleKey }[]
 
 /** Props supplied by the settings plugin slot and this package's controller. */
 export type LeisureTimeQueueCardProps =
@@ -113,29 +97,6 @@ function utcDateTime(value: string): string | undefined {
   if (value === '') return ''
   const epoch = Date.parse(value)
   return Number.isFinite(epoch) ? new Date(epoch).toISOString() : undefined
-}
-
-function modelKey(provider: string, model: string): string {
-  return JSON.stringify([provider, model])
-}
-
-function modelChoices(state: LeisureClientState): ModelChoice[] {
-  return state.modelCatalog?.groups.flatMap(group => group.models.map(model => ({
-    key: modelKey(group.id, model.id),
-    provider: group.id,
-    providerName: group.name,
-    model: model.id,
-    modelName: model.name,
-    efforts: model.reasoning?.efforts ?? [],
-    ...(model.reasoning?.defaultEffort === undefined ? {} : { defaultEffort: model.reasoning.defaultEffort }),
-  }))) ?? []
-}
-
-function supportedReasoningEffort(choice: ModelChoice | undefined, ...candidates: Array<string | undefined>): string {
-  for (const candidate of candidates) {
-    if (candidate !== undefined && choice?.efforts.some(effort => effort.id === candidate) === true) return candidate
-  }
-  return ''
 }
 
 function ScheduleEditor(props: {
@@ -259,15 +220,6 @@ export function LeisureTimeQueueCard(props: LeisureTimeQueueCardProps) {
   const [selectedId, setSelectedId] = useState('')
   const selected = state.dashboard?.sessions.find(session => session.sessionId === selectedId)
   const [sessionDraft, setSessionDraft] = useState<PolicyDraft>(() => policyDraft(DEFAULT_CONFIG.defaultPolicy))
-  const [targetMode, setTargetMode] = useState<'existing' | 'new'>('existing')
-  const [targetSessionId, setTargetSessionId] = useState('')
-  const [cwd, setCwd] = useState('')
-  const [selectedModelKey, setSelectedModelKey] = useState('')
-  const [reasoningEffort, setReasoningEffort] = useState('')
-  const [permissionPreset, setPermissionPreset] = useState('workspace-write')
-  const [title, setTitle] = useState('')
-  const [prompt, setPrompt] = useState('')
-  const [notBefore, setNotBefore] = useState('')
   const [editDraft, setEditDraft] = useState<EditDraft | undefined>()
   const [validation, setValidation] = useState<string | undefined>()
 
@@ -286,42 +238,10 @@ export function LeisureTimeQueueCard(props: LeisureTimeQueueCardProps) {
     if (!sessions.some(session => session.sessionId === selectedId)) setSelectedId(sessions[0]?.sessionId ?? '')
   }, [sessionsKey, selectedId])
 
-  const targetSessionsKey = state.sessions.map(session => session.sessionId).join('\n')
-  useEffect(() => {
-    if (state.sessions.length === 0) {
-      setTargetSessionId('')
-      setTargetMode('new')
-      return
-    }
-    if (!state.sessions.some(session => session.sessionId === targetSessionId)) {
-      setTargetSessionId(state.sessions[0]?.sessionId ?? '')
-    }
-  }, [targetSessionsKey, targetSessionId])
-
-  const choices = useMemo(() => modelChoices(state), [state.modelCatalog])
   const sessionTitles = useMemo(
     () => new Map(state.sessions.map(session => [session.sessionId, session.title] as const)),
     [state.sessions],
   )
-  const choicesKey = choices.map(choice => `${choice.key}:${choice.efforts.map(effort => effort.id).join(',')}`).join('\n')
-  useEffect(() => {
-    if (choices.length === 0) {
-      setSelectedModelKey('')
-      setReasoningEffort('')
-      return
-    }
-    if (choices.some(choice => choice.key === selectedModelKey)) return
-    const preferredKey = state.modelCatalog === undefined
-      ? ''
-      : modelKey(state.modelCatalog.default.provider, state.modelCatalog.default.model)
-    const preferred = choices.find(choice => choice.key === preferredKey) ?? choices[0]
-    setSelectedModelKey(preferred?.key ?? '')
-    setReasoningEffort(supportedReasoningEffort(
-      preferred,
-      preferred?.key === preferredKey ? state.modelCatalog?.default.reasoningEffort : undefined,
-      preferred?.defaultEffort,
-    ))
-  }, [choicesKey, selectedModelKey, state.modelCatalog])
 
   const selectedPolicyKey = selected === undefined ? '' : `${selected.sessionId}:${JSON.stringify(selected.policy)}`
   useEffect(() => {
@@ -331,7 +251,6 @@ export function LeisureTimeQueueCard(props: LeisureTimeQueueCardProps) {
 
   const globalPolicy = useMemo(() => validPolicy(globalDraft.defaultPolicy), [globalDraft])
   const sessionPolicy = useMemo(() => validPolicy(sessionDraft), [sessionDraft])
-  const selectedModel = choices.find(choice => choice.key === selectedModelKey)
   const disabled = state.busy || !state.settings.writable
 
   const saveGlobal = (): void => {
@@ -352,48 +271,6 @@ export function LeisureTimeQueueCard(props: LeisureTimeQueueCardProps) {
     void props.saveSession(selected.sessionId, sessionPolicy)
   }
 
-  const createTask = (): void => {
-    if (title.trim() === '' || prompt.trim() === '') {
-      setValidation(t('emptyRequired'))
-      return
-    }
-    if (targetMode === 'existing' && targetSessionId === '') {
-      setValidation(t('sessionRequired'))
-      return
-    }
-    if (targetMode === 'new' && selectedModel === undefined) {
-      setValidation(t('modelRequired'))
-      return
-    }
-    const instant = utcDateTime(notBefore)
-    if (instant === undefined) {
-      setValidation(t('operationFailed'))
-      return
-    }
-    setValidation(undefined)
-    const task = {
-      title: title.trim(),
-      prompt: prompt.trim(),
-      ...(instant === '' ? {} : { notBefore: instant }),
-    }
-    const selectedEffort = supportedReasoningEffort(selectedModel, reasoningEffort)
-    const operation = targetMode === 'existing'
-      ? props.createTask(targetSessionId, task)
-      : props.createSessionTask({
-          ...task,
-          ...(cwd.trim() === '' ? {} : { cwd: cwd.trim() }),
-          provider: selectedModel?.provider ?? '',
-          model: selectedModel?.model ?? '',
-          ...(selectedEffort === '' ? {} : { reasoningEffort: selectedEffort }),
-          permissionPreset,
-        })
-    void operation.then(() => {
-      setTitle('')
-      setPrompt('')
-      setNotBefore('')
-    })
-  }
-
   const saveEdit = (): void => {
     if (selected === undefined || editDraft === undefined || editDraft.title.trim() === '' || editDraft.prompt.trim() === '') {
       setValidation(t('emptyRequired'))
@@ -412,18 +289,6 @@ export function LeisureTimeQueueCard(props: LeisureTimeQueueCardProps) {
     if (selected === undefined) return
     if (action === 'delete' && typeof confirm === 'function' && !confirm(t('confirmDelete'))) return
     void props.taskAction(selected.sessionId, action, task.id)
-  }
-
-  const chooseModel = (key: string): void => {
-    const choice = choices.find(candidate => candidate.key === key)
-    setSelectedModelKey(key)
-    setReasoningEffort(supportedReasoningEffort(choice, choice?.defaultEffort))
-  }
-
-  const chooseWorkingDirectory = (): void => {
-    void props.pickDirectory().then((path) => {
-      if (path !== null) setCwd(path)
-    })
   }
 
   return (
@@ -469,82 +334,7 @@ export function LeisureTimeQueueCard(props: LeisureTimeQueueCardProps) {
               : null}
             <section className="ltq-section">
               <div className="ltq-sectionhead"><div><h3>{t('createTitle')}</h3><p className="ltq-muted">{t('createHint')}</p></div></div>
-              <div className="ltq-grid">
-                <label className="ltq-field">
-                  <span className="ltq-label">{t('createTarget')}</span>
-                  <select className="ltq-select" value={targetMode} disabled={state.busy} onChange={event => { setTargetMode(event.target.value as 'existing' | 'new') }}>
-                    <option value="existing" disabled={state.sessions.length === 0}>{t('targetExisting')}</option>
-                    <option value="new">{t('targetNew')}</option>
-                  </select>
-                </label>
-                {targetMode === 'existing'
-                  ? (
-                    <label className="ltq-field">
-                      <span className="ltq-label">{t('existingSession')}</span>
-                      <select className="ltq-select" value={targetSessionId} disabled={state.busy || state.sessions.length === 0} onChange={event => { setTargetSessionId(event.target.value) }}>
-                        {state.sessions.map(session => <option key={session.sessionId} value={session.sessionId}>{sessionIdentity(session.title, session.sessionId)}</option>)}
-                      </select>
-                    </label>
-                  )
-                  : (
-                    <>
-                      <label className="ltq-field">
-                        <span className="ltq-label">{t('model')}</span>
-                        <select className="ltq-select" value={selectedModelKey} disabled={state.busy || choices.length === 0} onChange={event => { chooseModel(event.target.value) }}>
-                          {state.modelCatalog?.groups.map(group => (
-                            <optgroup label={group.name} key={group.id}>
-                              {group.models.map(model => <option key={model.id} value={modelKey(group.id, model.id)}>{model.name}</option>)}
-                            </optgroup>
-                          ))}
-                        </select>
-                        {state.modelCatalog === undefined && state.modelError === undefined ? <span className="ltq-muted">{t('modelLoading')}</span> : null}
-                        {state.modelCatalog !== undefined && choices.length === 0 ? <span className="ltq-muted">{t('modelUnavailable')}</span> : null}
-                        {state.modelError !== undefined ? <span className="ltq-error">{state.modelError}</span> : null}
-                      </label>
-                      {selectedModel !== undefined && selectedModel.efforts.length > 0
-                        ? (
-                          <label className="ltq-field">
-                            <span className="ltq-label">{t('reasoningEffort')}</span>
-                            <select className="ltq-select" value={reasoningEffort} disabled={state.busy} onChange={event => { setReasoningEffort(event.target.value) }}>
-                              <option value="">{t('reasoningDefault')}</option>
-                              {selectedModel.efforts.map(effort => <option key={effort.id} value={effort.id}>{effort.name}</option>)}
-                            </select>
-                          </label>
-                        )
-                        : null}
-                      <label className="ltq-field">
-                        <span className="ltq-label">{t('permission')}</span>
-                        <select className="ltq-select" value={permissionPreset} disabled={state.busy} onChange={event => { setPermissionPreset(event.target.value) }}>
-                          {PERMISSION_PRESETS.map(option => <option key={option.id} value={option.id}>{t(option.label)}</option>)}
-                        </select>
-                      </label>
-                      <div className="ltq-field">
-                        <span className="ltq-label">{t('workingDirectory')}</span>
-                        <div className="ltq-pathPicker">
-                          <div className={`ltq-pathValue${cwd === '' ? ' ltq-pathPlaceholder' : ''}`} title={cwd === '' ? undefined : cwd}>
-                            <span>{cwd === '' ? t('workingDirectoryHint') : cwd}</span>
-                          </div>
-                          <button className="ltq-button ltq-pathButton" type="button" disabled={state.busy} onClick={chooseWorkingDirectory}>
-                            <IconFolderOpenOutline16 />
-                            <span>{t('chooseWorkingDirectory')}</span>
-                          </button>
-                          {cwd === ''
-                            ? null
-                            : (
-                              <button className="ltq-button ltq-iconButton" type="button" disabled={state.busy} aria-label={t('clearWorkingDirectory')} title={t('clearWorkingDirectory')} onClick={() => { setCwd('') }}>
-                                <IconCloseOutline16 />
-                              </button>
-                            )}
-                        </div>
-                      </div>
-                      <p className="ltq-muted ltq-fieldwide">{t('newSessionHint')}</p>
-                    </>
-                  )}
-                <label className="ltq-field"><span className="ltq-label">{t('taskTitle')}</span><input className="ltq-input" value={title} disabled={state.busy} onChange={event => { setTitle(event.target.value) }} /></label>
-                <label className="ltq-field"><span className="ltq-label">{t('notBefore')}</span><input className="ltq-input" type="datetime-local" value={notBefore} disabled={state.busy} onChange={event => { setNotBefore(event.target.value) }} /></label>
-                <label className="ltq-field ltq-fieldwide"><span className="ltq-label">{t('taskPrompt')}</span><textarea className="ltq-textarea" value={prompt} disabled={state.busy} onChange={event => { setPrompt(event.target.value) }} /></label>
-              </div>
-              <div className="ltq-actions"><button className="ltq-button ltq-buttonPrimary" type="button" disabled={state.busy} onClick={createTask}>{t('create')}</button></div>
+              <TaskCreateForm {...props} />
             </section>
             <section className="ltq-section">
               <div className="ltq-sectionhead"><h3>{t('sessionTitle')}</h3></div>

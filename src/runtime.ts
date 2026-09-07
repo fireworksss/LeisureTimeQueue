@@ -33,6 +33,8 @@ function outcomeMessage(reason: SessionEvent<'turn/end'>['data']['reason']): str
 
 /** Global FIFO coordinator across every live root agent owned by this Harness process. */
 export class LeisureTimeCoordinator {
+  private readonly agents: Context['agents']
+  private readonly logger: Context['logger']
   private readonly owners = new Map<string, Owner>()
   private readonly disposers: Array<() => void> = []
   private timer: ReturnType<typeof setInterval> | undefined
@@ -47,6 +49,8 @@ export class LeisureTimeCoordinator {
     config: Config | (() => Config),
     private readonly store: QueueStore,
   ) {
+    this.agents = ctx.agents
+    this.logger = ctx.logger
     this.config = typeof config === 'function' ? config : () => config
     this.manager = new LeisureQueueManager(store, this.config, () => this.requestDrive())
   }
@@ -66,7 +70,7 @@ export class LeisureTimeCoordinator {
     this.disposers.push(this.ctx.on('session/event', (session, event) => {
       if (event.type === 'turn/end') void this.onTurnEnd(session.id, event)
     }))
-    for (const agent of this.ctx.agents.roots()) void this.attach(agent)
+    for (const agent of this.agents.roots()) void this.attach(agent)
     this.timer = setInterval(() => this.requestDrive(), this.config().pollIntervalSeconds * 1000)
     this.requestDrive()
   }
@@ -86,17 +90,27 @@ export class LeisureTimeCoordinator {
     if (this.stopping || !this.config().enabled) return
     this.requested = true
     if (this.drive !== undefined) return
-    const run = this.ctx.agents.withoutInitiator(async () => {
-      while (this.requested && !this.stopping) {
-        this.requested = false
-        await this.driveOnce()
-      }
-    })
+    let run: Promise<void>
+    try {
+      run = this.agents.withoutInitiator(async () => {
+        while (this.requested && !this.stopping) {
+          this.requested = false
+          await this.driveOnce()
+        }
+      })
+    } catch {
+      // Cordis can dispose the initiator service just before this plugin's
+      // async effect cleanup runs. A final timer tick is terminal, not a fault.
+      this.stopping = true
+      this.requested = false
+      if (this.timer !== undefined) clearInterval(this.timer)
+      return
+    }
     this.drive = run
     void run.then(
       () => { this.retire(run) },
       (cause: unknown) => {
-        this.ctx.logger.warn(`leisure-time-queue: coordinator failed: ${cause instanceof Error ? cause.message : String(cause)}`)
+        this.logger.warn(`leisure-time-queue: coordinator failed: ${cause instanceof Error ? cause.message : String(cause)}`)
         this.retire(run)
       },
     )
@@ -109,7 +123,7 @@ export class LeisureTimeCoordinator {
   }
 
   private async attach(agent: Agent): Promise<void> {
-    if (this.stopping || this.owners.has(agent.id) || !this.ctx.agents.roots().includes(agent)) return
+    if (this.stopping || this.owners.has(agent.id) || !this.agents.roots().includes(agent)) return
     const owner: Owner = { agent, disposeTools: () => {} }
     owner.disposeTools = registerLeisureTimeTools(agent, this.manager)
     this.owners.set(agent.id, owner)

@@ -4,6 +4,9 @@ import type {} from '@deepseek-ai/dsh-api-session-controller/client'
 import type {} from '@deepseek-ai/dsh-client-connection/client'
 import type {} from '@deepseek-ai/dsh-client-locale/client'
 import type {} from '@deepseek-ai/dsh-client-ui-renderer/client'
+import type {} from '@deepseek-ai/dsh-client-ui-conversation/client'
+import type {} from '@deepseek-ai/dsh-client-ui-sidebar/client'
+import type {} from '@deepseek-ai/dsh-client-ui-session/client'
 import type {} from '@deepseek-ai/dsh-client-ui-settings/client'
 import type {} from '@deepseek-ai/dsh-client-ui-settings-plugins/client'
 import type {} from '@deepseek-ai/dsh-client-ui-slots'
@@ -12,6 +15,7 @@ import type { LeisureSettings } from '../settings.ts'
 import { LEISURE_SETTINGS_NAMESPACE } from '../shared.ts'
 import { LeisureClientController } from './controller.ts'
 import { LeisureTimeQueueCard } from './LeisureTimeQueueCard.tsx'
+import { SessionQueueAction, SidebarQueueAction } from './QuickAccess.tsx'
 import { en, zh, type LeisureLocaleKey } from './locales.ts'
 import { installStyles } from './styles.ts'
 
@@ -27,7 +31,7 @@ declare module '@deepseek-ai/dsh-client-ui-slots' {
 /** Services required by the browser management card. */
 export const inject = ['connection', 'locale', 'remote', 'remote.session', 'sessions', 'slots', 'settingsScope', 'uiWorkspace']
 
-/** Register locale copy and the keyed card in Settings → Plugins. */
+/** Register the settings card plus the Session-header and sidebar quick entries. */
 export function apply(ctx: Context): void {
   installStyles()
   ctx.effect(() => ctx.locale.register(NS, { zh, en }), 'leisure-time-queue: client locale')
@@ -40,4 +44,18 @@ export function apply(ctx: Context): void {
     locale: NS,
     inject: () => controller.inject(),
   }, LeisureTimeQueueCard))
+  ctx.slots.inject('conversation.session.header.actions', () => ctx.slots.register({
+    name: 'conversation.session.header.actions',
+    id: 'leisure-time-queue',
+    order: 15,
+    locale: NS,
+    inject: () => controller.inject(),
+  }, SessionQueueAction))
+  ctx.slots.inject('sidebar.footer.action', () => ctx.slots.register({
+    name: 'sidebar.footer.action',
+    id: 'leisure-time-queue',
+    order: 10,
+    locale: NS,
+    inject: () => controller.inject(),
+  }, SidebarQueueAction))
 }
