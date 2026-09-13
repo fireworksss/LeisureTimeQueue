@@ -33,7 +33,13 @@ export {
   settingsFromConfig,
   validateLeisureSettings,
 } from './settings.ts'
-export { LEISURE_RPC_CHANNEL, createLeisureRpcHandler, installLeisureRpc } from './rpc.ts'
+export {
+  LEISURE_RPC_CHANNEL,
+  LEISURE_RPC_ENDPOINT,
+  LEISURE_RPC_PATH,
+  createLeisureRpcHandler,
+  installLeisureRpc,
+} from './rpc.ts'
 
 /** Cordis function-plugin name. */
 export const name = 'leisure-time-queue'

@@ -1,12 +1,13 @@
 import type { Context } from '@deepseek-ai/cordis'
 import type { ClientRemote, ModelCatalog } from '@deepseek-ai/dsh-api-remotes/client'
 import type { ISessions } from '@deepseek-ai/dsh-api-session-controller/client'
+import type { IWorkspaces } from '@deepseek-ai/dsh-api-workspace-controller/client'
 import { createSnapshotStore, type SnapshotStore } from '@deepseek-ai/dsh-client-store'
 import type { ConnectionHandle } from '@deepseek-ai/dsh-client-connection/client'
 import type { SettingsScope, SettingsScopeSnapshot } from '@deepseek-ai/dsh-client-ui-settings/client'
 import type { UiWorkspace } from '@deepseek-ai/dsh-client-ui-workspace/client'
 import type { SessionId } from '@deepseek-ai/dsh-session/types'
-import { LEISURE_RPC_CHANNEL } from '../shared.ts'
+import { LEISURE_RPC_CHANNEL, LEISURE_RPC_ENDPOINT } from '../shared.ts'
 import type { LeisureSettings } from '../settings.ts'
 import type { IdlePolicy, LeisureDashboard } from '../types.ts'
 
@@ -85,10 +86,12 @@ function dashboard(value: unknown): LeisureDashboard {
 export class LeisureClientController {
   readonly store: SnapshotStore<LeisureClientState>
   private readonly sessions: ISessions
+  private readonly workspaces: IWorkspaces
   private readonly remote: ClientRemote
   private readonly uiWorkspace: UiWorkspace
   private readonly stopScope: () => void
   private readonly stopSessions: () => void
+  private readonly stopWorkspaces: () => void
   private readonly stopReset: () => void
   private readonly timer: ReturnType<typeof setInterval>
   private disposed = false
@@ -98,6 +101,7 @@ export class LeisureClientController {
     private readonly scope: SettingsScope<LeisureSettings>,
   ) {
     this.sessions = Reflect.get(ctx, 'sessions') as unknown as ISessions
+    this.workspaces = Reflect.get(ctx, 'workspaces') as unknown as IWorkspaces
     this.remote = Reflect.get(ctx, 'remote') as ClientRemote
     this.uiWorkspace = Reflect.get(ctx, 'uiWorkspace') as UiWorkspace
     this.store = createSnapshotStore({
@@ -110,6 +114,9 @@ export class LeisureClientController {
       this.store.update(state => { state.settings = scope.getSnapshot() })
     })
     this.stopSessions = this.sessions.list.subscribe(() => {
+      this.store.update(state => { state.sessions = this.sessionOptions() })
+    })
+    this.stopWorkspaces = this.workspaces.list.subscribe(() => {
       this.store.update(state => { state.sessions = this.sessionOptions() })
     })
     this.stopReset = ctx.on('connection/reset', () => { void this.refresh() })
@@ -267,6 +274,7 @@ export class LeisureClientController {
     this.disposed = true
     clearInterval(this.timer)
     this.stopReset()
+    this.stopWorkspaces()
     this.stopSessions()
     this.stopScope()
   }
@@ -320,16 +328,21 @@ export class LeisureClientController {
   }
 
   private async call(endpoint: string, payload: object): Promise<unknown> {
-    const result = await this.ctx.connection.rpc.call(LEISURE_RPC_CHANNEL, endpoint, payload) as RpcSuccess | RpcFailure
+    const result = await this.ctx.connection.rpc.call(
+      LEISURE_RPC_CHANNEL,
+      LEISURE_RPC_ENDPOINT,
+      { endpoint, payload },
+    ) as RpcSuccess | RpcFailure
     if (!result.ok) throw new Error(result.error.message)
     return result.value
   }
 
   private sessionOptions(): LeisureSessionOption[] {
     const snapshot = this.sessions.list.getSnapshot()
+    const archived = new Set(this.workspaces.list.getSnapshot().archivedSessionIds.map(String))
     return snapshot.ids.flatMap((sessionId) => {
       const summary = snapshot.byId[sessionId]
-      if (summary === undefined) return []
+      if (summary === undefined || archived.has(String(summary.id))) return []
       return [{
         sessionId: String(summary.id),
         title: summary.displayTitle,

@@ -27,8 +27,8 @@
 | 组件 | 版本要求 | 说明 |
 | --- | --- | --- |
 | |
-| DeepSeek Harness CLI | `@deepseek-ai/dsh@0.1.2-rc.1` | 至少需要此版本 |
-| DeepSeek Harness 相关包 | `0.1.2-rc.1` | 至少需要此版本 |
+| DeepSeek Harness CLI | `@deepseek-ai/dsh@0.1.5-rc.1` | 至少需要此版本 |
+| DeepSeek Harness 相关包 | `0.1.5-rc.1` | 至少需要此版本 |
  |
 
 

@@ -1,7 +1,7 @@
 import type { Context } from '@deepseek-ai/cordis'
 import type { LeisureQueueManager } from './manager.ts'
 import type { LeisureTimeCoordinator } from './runtime.ts'
-import { LEISURE_RPC_CHANNEL } from './shared.ts'
+import { LEISURE_RPC_CHANNEL, LEISURE_RPC_ENDPOINT, LEISURE_RPC_PATH } from './shared.ts'
 import type { IdlePolicy, LeisureOperationError } from './types.ts'
 
 interface RpcFailure {
@@ -17,12 +17,24 @@ type RpcResult<T> =
 type RpcHandler = (endpoint: string, payload: unknown, signal: AbortSignal) => Promise<RpcResult<unknown>>
 
 interface HostConnection {
-  readonly rpc: {
-    handle(channel: string, handler: RpcHandler): () => Promise<void>
+  readonly fetch: {
+    register(route: {
+      readonly path: string
+      readonly methods: readonly ['POST']
+      readonly requestBody: 'buffered'
+      readonly fetch: (request: Request) => Promise<Response>
+    }): () => Promise<void>
   }
 }
 
-export { LEISURE_RPC_CHANNEL }
+interface ClientRequestEnvelope {
+  readonly type: 'client-request'
+  readonly rpcId: string
+  readonly method: string
+  readonly payload: unknown
+}
+
+export { LEISURE_RPC_CHANNEL, LEISURE_RPC_ENDPOINT, LEISURE_RPC_PATH }
 
 function connectionOf(ctx: Context): HostConnection {
   return Reflect.get(ctx, 'connection') as unknown as HostConnection
@@ -33,6 +45,20 @@ function record(value: unknown): Record<string, unknown> {
     throw new TypeError('payload must be an object')
   }
   return value as Record<string, unknown>
+}
+
+function requestEnvelope(value: unknown): ClientRequestEnvelope {
+  const input = record(value)
+  if (input['type'] !== 'client-request'
+    || typeof input['rpcId'] !== 'string'
+    || input['method'] !== LEISURE_RPC_ENDPOINT) {
+    throw new TypeError('invalid LeisureTimeQueue RPC envelope')
+  }
+  return input as unknown as ClientRequestEnvelope
+}
+
+function response(rpcId: string, result: RpcResult<unknown>): Response {
+  return Response.json({ type: 'server-response', rpcId, result })
 }
 
 function stringField(input: Record<string, unknown>, key: string, optional = false): string | undefined {
@@ -127,9 +153,32 @@ export function createLeisureRpcHandler(coordinator: LeisureTimeCoordinator): Rp
   }
 }
 
-/** Register the management channel through Harness browser trust and authentication. */
+/** Register the management endpoint under Harness's authenticated shared API route. */
 export function installLeisureRpc(ctx: Context, coordinator: LeisureTimeCoordinator): void {
-  connectionOf(ctx).rpc.handle(LEISURE_RPC_CHANNEL, createLeisureRpcHandler(coordinator))
+  const handler = createLeisureRpcHandler(coordinator)
+  connectionOf(ctx).fetch.register({
+    path: LEISURE_RPC_PATH,
+    methods: ['POST'],
+    requestBody: 'buffered',
+    fetch: async (request) => {
+      let envelope: ClientRequestEnvelope
+      try {
+        envelope = requestEnvelope(await request.json())
+      } catch (cause: unknown) {
+        return new Response(cause instanceof Error ? cause.message : String(cause), { status: 400 })
+      }
+      try {
+        const routed = record(envelope.payload)
+        const endpoint = stringField(routed, 'endpoint') as string
+        return response(envelope.rpcId, await handler(endpoint, routed['payload'], request.signal))
+      } catch (cause: unknown) {
+        return response(envelope.rpcId, failure(
+          'leisure/bad-request',
+          cause instanceof Error ? cause.message : String(cause),
+        ))
+      }
+    },
+  })
 }
 
 /** Normalize a browser-provided schedule through the Host validator. */

@@ -1,6 +1,7 @@
 import type { Context } from '@deepseek-ai/cordis'
 import type {} from '@deepseek-ai/dsh-api-remotes/client'
 import type {} from '@deepseek-ai/dsh-api-session-controller/client'
+import type {} from '@deepseek-ai/dsh-api-workspace-controller/client'
 import type {} from '@deepseek-ai/dsh-client-connection/client'
 import type {} from '@deepseek-ai/dsh-client-locale/client'
 import type {} from '@deepseek-ai/dsh-client-ui-renderer/client'
@@ -29,7 +30,7 @@ declare module '@deepseek-ai/dsh-client-ui-slots' {
 }
 
 /** Services required by the browser management card. */
-export const inject = ['connection', 'locale', 'remote', 'remote.session', 'sessions', 'slots', 'settingsScope', 'uiWorkspace']
+export const inject = ['connection', 'locale', 'remote', 'remote.session', 'sessions', 'slots', 'settingsScope', 'uiWorkspace', 'workspaces']
 
 /** Register the settings card plus the Session-header and sidebar quick entries. */
 export function apply(ctx: Context): void {
